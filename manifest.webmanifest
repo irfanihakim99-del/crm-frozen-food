@@ -1,0 +1,26 @@
+{
+ "name": "CRM Frozen Food",
+ "short_name": "Frozen CRM",
+ "description": "Kelola stok, mutasi barang, keuangan, dan pelanggan usaha frozen food. Data tersimpan di perangkat ini.",
+ "lang": "id",
+ "start_url": "./index.html",
+ "scope": "./",
+ "display": "standalone",
+ "orientation": "portrait",
+ "background_color": "#07303c",
+ "theme_color": "#0a4a5a",
+ "icons": [
+  {
+   "src": "icon.svg",
+   "sizes": "any",
+   "type": "image/svg+xml",
+   "purpose": "any"
+  },
+  {
+   "src": "icon-maskable.svg",
+   "sizes": "any",
+   "type": "image/svg+xml",
+   "purpose": "maskable"
+  }
+ ]
+}
