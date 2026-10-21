@@ -1230,18 +1230,44 @@
       openSheet(
         '<h3>Catat Keuangan Manual</h3>'
         + '<p class="sub">Untuk pemasukan/pengeluaran di luar mutasi barang — cth: listrik freezer, bensin antar, plastik kemasan, atau modal tambahan.</p>'
-        + '<div class="seg"><button type="button" id="finIn">Pemasukan</button><button type="button" id="finOut" class="on-out">Pengeluaran</button></div>'
+        + '<div class="seg"><button type="button" id="finTypeIn">Pemasukan</button><button type="button" id="finTypeOut" class="on-out">Pengeluaran</button></div>'
         + fieldHtml("k-desc","Keterangan", inputHtml("k-desc","text","","placeholder=\"cth: Listrik freezer bulan ini\" autocomplete=\"off\""), "Keterangan wajib diisi.")
         + '<div class="f2">'
         + fieldHtml("k-amount","Jumlah (Rp)", inputHtml("k-amount","number","",'min="0" step="any" inputmode="numeric" placeholder="cth: 350000"'), "Jumlah harus lebih dari 0.")
         + fieldHtml("k-date","Tanggal", inputHtml("k-date","date",todayISO()))
         + '</div>'
-        + fieldHtml("k-cat","Kategori", '<select id="k-cat"><option>Operasional</option><option>Listrik & Air</option><option>Transportasi</option><option>Kemasan</option><option>Gaji</option><option>Sewa</option><option>Modal</option><option>Lainnya</option></select>')
+        + fieldHtml("k-cat","Kategori", '<select id="k-cat"></select>')
         + sheetActions("Simpan Catatan")
       );
       bindCancel();
-      $("#finIn").addEventListener("click", function(){ finType = "masuk"; this.className = "on-in"; $("#finOut").className = ""; });
-      $("#finOut").addEventListener("click", function(){ finType = "keluar"; this.className = "on-out"; $("#finIn").className = ""; });
+      function finCatGroups(){
+        // Selain kategori keuangan umum, kategori form ini juga memuat barang
+        // jualan dari data stok: kategori barangnya dan nama tiap barangnya.
+        var umum = finType==="masuk"
+          ? ["Penjualan","Modal","Lainnya"]
+          : ["Beli Stok","Operasional","Listrik & Air","Transportasi","Kemasan","Gaji","Sewa","Lainnya"];
+        var produkCats = [];
+        CATEGORIES.forEach(function(c){ produkCats.push(c); });
+        state.products.forEach(function(p){ if(p.category && produkCats.indexOf(p.category)<0) produkCats.push(p.category); });
+        var barang = state.products.map(function(p){ return p.name; });
+        return [
+          { label:"Umum", items:umum },
+          { label:"Kategori Barang (dari Stok)", items:produkCats },
+          { label:"Barang Jualan (dari Stok)", items:barang }
+        ];
+      }
+      function fillFinCats(){
+        var sel = $("#k-cat", sheet), prev = sel.value;
+        sel.innerHTML = finCatGroups().map(function(g){
+          if(!g.items.length) return "";
+          return '<optgroup label="'+esc(g.label)+'">' + g.items.map(function(c){
+            return '<option value="'+esc(c)+'"'+(c===prev?" selected":"")+'>'+esc(c)+'</option>';
+          }).join("") + '</optgroup>';
+        }).join("");
+      }
+      fillFinCats();
+      $("#finTypeIn", sheet).addEventListener("click", function(){ finType = "masuk"; this.className = "on-in"; $("#finTypeOut", sheet).className = ""; fillFinCats(); });
+      $("#finTypeOut", sheet).addEventListener("click", function(){ finType = "keluar"; this.className = "on-out"; $("#finTypeIn", sheet).className = ""; fillFinCats(); });
       $("#shSave").addEventListener("click", function(){
         var desc = $("#k-desc").value.trim();
         var amount = num($("#k-amount").value);
