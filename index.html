@@ -295,6 +295,8 @@
       .install-steps{margin:0; padding-left:20px; font-size:14px; color:var(--ink2);}
       .install-steps li{margin-bottom:9px;}
       .install-steps b{color:var(--ink);}
+      .imp-file{font-size:12.5px; color:var(--ink2); margin:0 0 10px; word-break:break-all;}
+      .imp-note{font-size:12px; margin-top:7px;}
 
       /* ---------- Toast ---------- */
       #toast{
@@ -401,6 +403,11 @@
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6h11M9 12h11M9 18h11"/><path d="m3.5 6 1 1 2-2M3.5 12l1 1 2-2M3.5 18l1 1 2-2"/></svg>
               Stok Opname
             </button>
+            <button class="btn" id="btnImportExcel" type="button">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M9 10v10"/><path d="M15 10v10"/></svg>
+              Import Excel
+            </button>
+            <input type="file" id="fileExcel" accept=".xlsx,.xls,.csv" hidden />
             <button class="btn primary" id="btnAddProduct" type="button">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
               Tambah Barang
@@ -534,6 +541,7 @@
     </div>
 
     <div id="toast" role="status"></div>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script>
     "use strict";
     /* ================= STATE (tersimpan di perangkat) ================= */
@@ -788,8 +796,9 @@
 
       var box = $("#stokList");
       if(state.products.length===0){
-        box.innerHTML = '<div class="empty"><div class="big"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--brand)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="M3 8l9 5 9-5"/><path d="M12 13v8"/></svg></div><b>Belum ada barang</b><p>Tambahkan produk frozen food pertamamu — nugget, bakso, ayam beku, dan lainnya — lengkap dengan harga modal &amp; jual.</p><button class="btn primary" type="button" id="emptyAddProduct">Tambah Barang</button></div>';
+        box.innerHTML = '<div class="empty"><div class="big"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--brand)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="M3 8l9 5 9-5"/><path d="M12 13v8"/></svg></div><b>Belum ada barang</b><p>Tambahkan produk frozen food pertamamu — nugget, bakso, ayam beku, dan lainnya — lengkap dengan harga modal &amp; jual. Atau import banyak barang sekaligus dari file Excel.</p><button class="btn primary" type="button" id="emptyAddProduct">Tambah Barang</button> <button class="btn" type="button" id="emptyImportExcel">Import dari Excel</button></div>';
         $("#emptyAddProduct").addEventListener("click", function(){ openProductForm(null); });
+        $("#emptyImportExcel").addEventListener("click", openImportExcel);
         return;
       }
       if(list.length===0){
@@ -1302,6 +1311,223 @@
         save(); closeSheet(); render(); toast("Pelanggan dihapus.");
       });
     }
+
+    /* ================= IMPORT EXCEL ================= */
+    var excelRows = [];
+    function ensureXLSX(){
+      if(typeof XLSX === "undefined"){
+        toast("Fitur Excel belum siap — periksa koneksi internet, lalu muat ulang aplikasi.");
+        return false;
+      }
+      return true;
+    }
+    function parseNumID(v){
+      if(v===null || v===undefined || v==="") return 0;
+      if(typeof v==="number") return v;
+      var s = String(v).replace(/[^\d.,-]/g,"").trim();
+      if(!s) return 0;
+      if(/^-?\d{1,3}([.,]\d{3})+$/.test(s)) s = s.replace(/[.,]/g,"");
+      else s = s.replace(/\./g,"").replace(",", ".");
+      var n = parseFloat(s);
+      return isNaN(n) ? 0 : n;
+    }
+    function mkDateID(y, mo, d){
+      if(mo<1 || mo>12 || d<1 || d>31) return { iso:"", bad:true };
+      var dt = new Date(y, mo-1, d);
+      if(dt.getFullYear()!==y || dt.getMonth()!==mo-1 || dt.getDate()!==d) return { iso:"", bad:true };
+      return { iso: y + "-" + pad2(mo) + "-" + pad2(d), bad:false };
+    }
+    function parseDateID(v){
+      if(v===null || v===undefined || v==="") return { iso:"", bad:false };
+      if(Object.prototype.toString.call(v)==="[object Date]" && !isNaN(v.getTime()))
+        return { iso: v.getFullYear() + "-" + pad2(v.getMonth()+1) + "-" + pad2(v.getDate()), bad:false };
+      if(typeof v==="number"){
+        if(v>20000 && v<90000){
+          var d = new Date(Math.round((v - 25569) * 86400000));
+          return { iso: d.getUTCFullYear() + "-" + pad2(d.getUTCMonth()+1) + "-" + pad2(d.getUTCDate()), bad:false };
+        }
+        return { iso:"", bad:true };
+      }
+      var s = String(v).trim();
+      if(!s) return { iso:"", bad:false };
+      var m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+      if(m) return mkDateID(+m[1], +m[2], +m[3]);
+      m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})/);
+      if(m) return mkDateID(+m[3], +m[2], +m[1]);
+      m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2})$/);
+      if(m) return mkDateID(2000 + (+m[3]), +m[2], +m[1]);
+      return { iso:"", bad:true };
+    }
+    var XL_COLS = {
+      name:     ["nama","namabarang","produk","namaproduk","barang","item"],
+      category: ["kategori","category","jenis","golongan"],
+      cost:     ["hargamodal","modal","hargabeli","beli","cost","hpp"],
+      price:    ["hargajual","jual","harga","price"],
+      stock:    ["stok","stock","jumlah","qty","stokawal","persediaan"],
+      minStock: ["stokminimum","stokmin","minstok","minimum","stokminimal","batasminimum"],
+      expiry:   ["tanggalkedaluwarsa","kedaluwarsa","kadaluarsa","tanggalkadaluarsa","tglkedaluwarsa","tglkadaluarsa","exp","expiry","expired","expireddate","bestbefore"],
+      unit:     ["satuan","unit"]
+    };
+    function normHead(s){ return String(s==null?"":s).toLowerCase().replace(/[^a-z0-9]/g,""); }
+    function parseExcelRows(aoa){
+      var headerIdx = -1, colMap = null;
+      for(var r=0; r<Math.min(aoa.length, 12); r++){
+        var row = aoa[r] || [], map = {};
+        row.forEach(function(cell, ci){
+          var key = normHead(cell);
+          if(!key) return;
+          Object.keys(XL_COLS).forEach(function(field){
+            if(map[field]===undefined && XL_COLS[field].indexOf(key)>=0) map[field] = ci;
+          });
+        });
+        if(map.name!==undefined){ headerIdx = r; colMap = map; break; }
+      }
+      if(headerIdx<0) return { error:"Kolom \u201CNama\u201D tidak ditemukan di baris judul file. Unduh template untuk melihat susunan kolom yang benar." };
+      var rows = [], seen = {};
+      for(var i=headerIdx+1; i<aoa.length; i++){
+        var raw = aoa[i] || [];
+        var anyVal = raw.some(function(c){ return String(c==null?"":c).trim()!==""; });
+        if(!anyVal) continue;
+        var get = function(field){ return colMap[field]===undefined ? "" : raw[colMap[field]]; };
+        var name = String(get("name")||"").trim();
+        var costRaw = get("cost"), priceRaw = get("price");
+        var cost = parseNumID(costRaw), price = parseNumID(priceRaw);
+        var stock = Math.floor(parseNumID(get("stock")));
+        var minRaw = get("minStock");
+        var minStock = (minRaw==="" || minRaw===null || minRaw===undefined) ? 5 : Math.max(0, Math.floor(parseNumID(minRaw)));
+        var exp = parseDateID(get("expiry"));
+        var category = String(get("category")||"").trim() || "Lainnya";
+        var unit = String(get("unit")||"").trim() || "pack";
+        var status = "ok", notes = [];
+        if(!name){ status = "skip"; notes.push("Nama barang kosong."); }
+        else if(String(costRaw==null?"":costRaw).trim()==="" || String(priceRaw==null?"":priceRaw).trim()===""){ status = "skip"; notes.push("Harga modal / harga jual kosong."); }
+        else if(cost<0 || price<0){ status = "skip"; notes.push("Harga tidak boleh negatif."); }
+        else if(stock<0){ status = "skip"; notes.push("Stok tidak boleh negatif."); }
+        if(status==="ok" && exp.bad) notes.push("Tanggal kedaluwarsa tidak dikenali — diimpor tanpa tanggal.");
+        var isUpdate = false;
+        if(name){
+          var ln = name.toLowerCase();
+          state.products.forEach(function(p){ if(p.name.toLowerCase()===ln) isUpdate = true; });
+          if(seen[ln]) isUpdate = true;
+          seen[ln] = true;
+        }
+        rows.push({ name:name, category:category, unit:unit, cost:cost, price:price, stock:stock, minStock:minStock, expiry:exp.bad?"":exp.iso, status:status, update:isUpdate, notes:notes });
+      }
+      if(rows.length===0) return { error:"Tidak ada baris data di bawah baris judul. Isi dulu data barangnya, lalu upload lagi." };
+      return { rows: rows };
+    }
+    function openImportExcel(){
+      openSheet(
+        '<h3>Import Barang dari Excel</h3>'
+        + '<p class="sub">Upload file Excel (.xlsx) berisi daftar barang — file dibaca langsung di perangkat ini, tanpa server.</p>'
+        + '<ol class="install-steps">'
+        + '<li><b>Unduh template</b> di bawah ini supaya susunan kolomnya benar.</li>'
+        + '<li>Isi data barangmu: <b>Nama, Kategori, Harga Modal, Harga Jual, Stok, Stok Minimum, Tanggal Kedaluwarsa</b>. Kolom Satuan boleh diisi, boleh dikosongkan.</li>'
+        + '<li><b>Pilih file Excel</b>-nya — kamu melihat pratinjau dulu sebelum data disimpan ke stok.</li>'
+        + '<li>Barang yang namanya sudah ada tidak diduplikat: datanya <b>diperbarui</b> dan stoknya <b>ditambah</b>.</li>'
+        + '</ol>'
+        + '<button class="btn" type="button" id="btnTpl" style="width:100%;justify-content:center;margin-bottom:4px">'
+        + '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M4 21h16"/></svg>'
+        + 'Unduh Template Excel (.xlsx)</button>'
+        + '<div class="sheet-actions"><button class="btn ghost" type="button" id="shCancel">Batal</button>'
+        + '<button class="btn primary" type="button" id="btnPickExcel">Pilih File Excel</button></div>'
+      );
+      bindCancel();
+      $("#btnTpl").addEventListener("click", downloadTemplate);
+      $("#btnPickExcel").addEventListener("click", function(){ $("#fileExcel").click(); });
+    }
+    function downloadTemplate(){
+      if(!ensureXLSX()) return;
+      var headers = ["Nama","Kategori","Harga Modal","Harga Jual","Stok","Stok Minimum","Tanggal Kedaluwarsa","Satuan"];
+      var contoh = [
+        ["Nugget Ayam 500g","Nugget & Sosis",18500,24000,40,10,"2027-03-31","pack"],
+        ["Bakso Sapi 1kg","Bakso",32000,40000,25,8,"2027-01-15","pack"],
+        ["Ayam Utuh Beku 1kg","Ayam",28500,35000,30,10,"2026-12-20","pcs"]
+      ];
+      var ws = XLSX.utils.aoa_to_sheet([headers].concat(contoh));
+      ws["!cols"] = [{wch:24},{wch:16},{wch:13},{wch:13},{wch:8},{wch:13},{wch:19},{wch:9}];
+      var wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Data Barang");
+      XLSX.writeFile(wb, "template-import-barang.xlsx");
+      toast("Template Excel diunduh — isi datanya, lalu upload kembali di sini.");
+    }
+    function handleExcelFile(file){
+      if(!ensureXLSX()) return;
+      var reader = new FileReader();
+      reader.onload = function(){
+        try{
+          var wb = XLSX.read(new Uint8Array(reader.result), { type:"array", cellDates:true });
+          var ws = wb.Sheets[wb.SheetNames[0]];
+          var aoa = XLSX.utils.sheet_to_json(ws, { header:1, defval:"", raw:true });
+          var parsed = parseExcelRows(aoa);
+          if(parsed.error){ toast(parsed.error); return; }
+          excelRows = parsed.rows;
+          openImportPreview(file.name);
+        }catch(e){
+          toast("File tidak bisa dibaca — pastikan formatnya .xlsx dan filenya tidak rusak.");
+        }
+      };
+      reader.onerror = function(){ toast("File tidak bisa dibaca dari perangkat."); };
+      reader.readAsArrayBuffer(file);
+    }
+    function openImportPreview(fname){
+      var okRows = excelRows.filter(function(r){ return r.status==="ok"; });
+      var newCount = okRows.filter(function(r){ return !r.update; }).length;
+      var updCount = okRows.length - newCount;
+      var skipCount = excelRows.length - okRows.length;
+      var html = '<h3>Pratinjau Import</h3>'
+        + '<p class="sub">Periksa dulu datanya — belum ada yang disimpan. Baris yang dilewati tidak akan masuk ke stok.</p>'
+        + '<p class="imp-file">File: <b>'+esc(fname)+'</b><br>'+excelRows.length+' baris data terbaca · <b>'+newCount+' baru</b> · <b>'+updCount+' update</b> · <b>'+skipCount+' dilewati</b></p>';
+      html += excelRows.map(function(r){
+        var badge = r.status==="skip"
+          ? '<span class="badge out">Dilewati</span>'
+          : (r.update ? '<span class="badge auto">Update — stok ditambah</span>' : '<span class="badge in">Barang baru</span>');
+        var notes = r.notes.length ? '<p class="imp-note" style="color:'+(r.status==="skip"?'var(--red)':'var(--amber)')+'">'+esc(r.notes.join(" "))+'</p>' : "";
+        return '<div class="item" style="box-shadow:none;margin-bottom:8px;padding:11px 13px;'+(r.status==="skip"?'opacity:.65;':'')+'">'
+          + '<div class="item-top"><div style="min-width:0"><p class="item-title" style="font-size:14.5px">'+esc(r.name||"(tanpa nama)")+'</p>'
+          + '<p class="item-meta"><span class="badge cat">'+esc(r.category)+'</span> · '+esc(r.unit)+'</p></div>'
+          + '<div style="flex:0 0 auto">'+badge+'</div></div>'
+          + '<div class="kv"><div><span>Modal</span><b class="num">'+rp(r.cost)+'</b></div>'
+          + '<div><span>Harga Jual</span><b class="num">'+rp(r.price)+'</b></div>'
+          + '<div><span>Stok</span><b class="num">'+(r.update?"+":"")+r.stock+'</b></div>'
+          + '<div><span>Min. Stok</span><b class="num">'+r.minStock+'</b></div>'
+          + '<div><span>Kedaluwarsa</span><b>'+(r.expiry?fmtDate(r.expiry):"—")+'</b></div></div>'
+          + notes + '</div>';
+      }).join("");
+      html += sheetActions("Import " + okRows.length + " Barang");
+      openSheet(html);
+      bindCancel();
+      if(okRows.length===0) $("#shSave").disabled = true;
+      $("#shSave").addEventListener("click", doImportExcel);
+    }
+    function doImportExcel(){
+      var added = 0, updated = 0;
+      excelRows.forEach(function(r){
+        if(r.status!=="ok") return;
+        var existing = null, ln = r.name.toLowerCase();
+        state.products.forEach(function(p){ if(p.name.toLowerCase()===ln) existing = p; });
+        if(existing){
+          existing.category = r.category; existing.unit = r.unit;
+          existing.cost = r.cost; existing.price = r.price;
+          existing.minStock = r.minStock;
+          if(r.expiry) existing.expiry = r.expiry;
+          existing.stock += r.stock;
+          updated++;
+        } else {
+          state.products.push({ id:uid(), name:r.name, category:r.category, unit:r.unit, cost:r.cost, price:r.price, stock:r.stock, minStock:r.minStock, expiry:r.expiry });
+          added++;
+        }
+      });
+      excelRows = [];
+      save(); closeSheet(); go("stok");
+      toast("Import selesai: " + added + " barang baru ditambahkan, " + updated + " barang diperbarui.");
+    }
+    $("#btnImportExcel").addEventListener("click", openImportExcel);
+    $("#fileExcel").addEventListener("change", function(){
+      var file = this.files && this.files[0];
+      this.value = "";
+      if(file) handleExcelFile(file);
+    });
 
     /* ================= EKSPOR / IMPOR ================= */
     $("#btnExport").addEventListener("click", function(){
